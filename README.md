@@ -1,32 +1,184 @@
-const int ledPins[] = {2, 3};
-const int numLeds = 2;
-const int buttonPin = 5;
+// Матрица 3x3 светодиодов (общий катод)
+// Пины: строки сверху вниз, столбцы слева направо
+int leds[3][3] = {
+  {2, 3, 4},   // строка 0 (верхняя)
+  {5, 6, 7},   // строка 1 (средняя)
+  {8, 9, 10}   // строка 2 (нижняя)
+};
 
-int currentLed = 0;
-bool lastButtonState = HIGH;
+// Текущее состояние матрицы (1 = горит, 0 = не горит)
+bool frame[3][3];
 
 void setup() {
-  for (int i = 0; i < numLeds; i++) {
-    pinMode(ledPins[i], OUTPUT);
+  // Все пины как выходы
+  for (int r = 0; r < 3; r++) {
+    for (int c = 0; c < 3; c++) {
+      pinMode(leds[r][c], OUTPUT);
+    }
   }
-  pinMode(buttonPin, INPUT_PULLUP);
-  updateLeds();
+  clearMatrix();
+  // Небольшая пауза, чтобы всё стабилизировалось
+  delay(500);
 }
 
 void loop() {
-  bool buttonState = digitalRead(buttonPin);
-  if (buttonState == LOW && lastButtonState == HIGH) {
-    delay(50);
-    if (digitalRead(buttonPin) == LOW) {
-      currentLed = (currentLed + 1) % numLeds;
-      updateLeds();
-    }
-  }
-  lastButtonState = buttonState;
+  // Эффект 1: смайлик (2 секунды показа, потом пауза)
+  showSmiley();
+  delay(6000); // общее время ~8 сек
+  
+  // Эффект 2: бегущая точка по периметру (3 круга)
+  runningDot(3);
+  delay(2000); // небольшая пауза перед следующим
+  
+  // Эффект 3: змейка (заполнение рядами сверху вниз и обратно)
+  snake();
+  delay(2000);
+  
+  // Эффект 4: случайное мерцание (огонь)
+  fireFlicker(5000); // длительность в мс (5 секунд)
+  
+  // Эффект 5: пульсирующее сердце
+  heartBeat(4); // 4 удара
+  delay(2000);
 }
 
-void updateLeds() {
-  for (int i = 0; i < numLeds; i++) {
-    digitalWrite(ledPins[i], i == currentLed ? HIGH : LOW);
+// ========== ФУНКЦИИ ЭФФЕКТОВ ==========
+
+// Просто показать смайлик
+void showSmiley() {
+  clearMatrix();
+  // Глаза
+  frame[0][0] = 1;
+  frame[0][2] = 1;
+  // Улыбка
+  frame[2][1] = 1;
+  drawMatrix();
+  delay(2000);
+  clearMatrix();
+  drawMatrix();
+}
+
+// Бегущая точка по периметру (можно задать количество кругов)
+void runningDot(int loops) {
+  // Последовательность координат по часовой стрелке
+  int path[8][2] = {
+    {0,0}, {0,1}, {0,2}, // верх
+    {1,2},              // правый центр
+    {2,2}, {2,1}, {2,0}, // низ
+    {1,0}               // левый центр (замыкать не нужно, вернёмся к началу отдельно)
+  };
+  
+  for (int l = 0; l < loops; l++) {
+    for (int i = 0; i < 8; i++) {
+      clearMatrix();
+      frame[path[i][0]][path[i][1]] = 1;
+      drawMatrix();
+      delay(120);
+    }
+    // Для зацикливания без скачка: можно сделать плавный переход к началу,
+    // просто пропускаем последний шаг повторно, но и так нормально.
+  }
+  clearMatrix();
+  drawMatrix();
+}
+
+// Змейка: заполняем ряд за рядом, потом в обратном порядке
+void snake() {
+  // Прямой ход: верх -> середина -> низ
+  for (int r = 0; r < 3; r++) {
+    // Включаем всю строку
+    for (int c = 0; c < 3; c++) {
+      frame[r][c] = 1;
+    }
+    drawMatrix();
+    delay(300);
+    // Гасим строку перед следующей (чтобы только одна горела)
+    // Если хотим, чтобы оставались гореть, закомментируйте очистку
+    clearMatrix();
+    // Но для эффекта движения только одной строки оставляем
+    // (если хотим накопление, не очищаем весь массив, а только отдельно)
+  }
+  // Обратный ход: низ -> середина -> верх
+  for (int r = 2; r >= 0; r--) {
+    for (int c = 0; c < 3; c++) {
+      frame[r][c] = 1;
+    }
+    drawMatrix();
+    delay(300);
+    clearMatrix();
+  }
+  clearMatrix();
+  drawMatrix();
+}
+
+// Случайное мерцание (эффект пламени)
+void fireFlicker(unsigned long durationMs) {
+  unsigned long start = millis();
+  while (millis() - start < durationMs) {
+    // Каждый светодиод зажигается случайно с вероятностью ~30%
+    for (int r = 0; r < 3; r++) {
+      for (int c = 0; c < 3; c++) {
+        // Случайное значение от 0 до 99
+        if (random(100) < 30) {
+          frame[r][c] = 1;
+        } else {
+          frame[r][c] = 0;
+        }
+      }
+    }
+    drawMatrix();
+    delay(50 + random(50)); // меняем состояние быстро
+  }
+  clearMatrix();
+  drawMatrix();
+}
+
+// Сердце, пульсирующее
+void heartBeat(int beats) {
+  // Пиксельная форма сердца (3x3):
+  // 0 1 0
+  // 1 1 1
+  // 0 1 0
+  bool heart[3][3] = {
+    {0, 1, 0},
+    {1, 1, 1},
+    {0, 1, 0}
+  };
+  
+  for (int b = 0; b < beats; b++) {
+    // Показываем сердце
+    for (int r = 0; r < 3; r++) {
+      for (int c = 0; c < 3; c++) {
+        frame[r][c] = heart[r][c];
+      }
+    }
+    drawMatrix();
+    delay(200);
+    // Гасим
+    clearMatrix();
+    drawMatrix();
+    delay(200);
+  }
+  clearMatrix();
+  drawMatrix();
+}
+
+// ========== БАЗОВЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С МАТРИЦЕЙ ==========
+
+// Обновить все светодиоды согласно массиву frame
+void drawMatrix() {
+  for (int r = 0; r < 3; r++) {
+    for (int c = 0; c < 3; c++) {
+      digitalWrite(leds[r][c], frame[r][c] ? HIGH : LOW);
+    }
+  }
+}
+
+// Погасить все светодиоды в массиве frame (не обновляя физически)
+void clearMatrix() {
+  for (int r = 0; r < 3; r++) {
+    for (int c = 0; c < 3; c++) {
+      frame[r][c] = 0;
+    }
   }
 }

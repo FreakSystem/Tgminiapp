@@ -1,179 +1,173 @@
 /*
- * СУПЕР-ПРОСТАЯ ИГРА "Повтори последовательность"
- * Светодиоды: D3..D11 (матрица 3x3), общий катод через резистор -> GND
- * Кнопки: A0=ВЛЕВО, A1=ВПРАВО, A2=ВВЕРХ, A3=ВНИЗ, A4=ЦЕНТР (все к GND)
+ * Игра "Повтори последовательность" (матрица 3x3)
+ * Светодиоды: D3..D11, общий катод через резистор -> GND
+ * Кнопки: A0=влево, A1=вправо, A2=вверх, A3=вниз, A4=центр (все к GND, INPUT_PULLUP)
  */
 
-// Пины светодиодов [строка][столбец]
-int led[3][3] = {
-  {3, 4, 5},
-  {6, 7, 8},
-  {9, 10, 11}
+// --------------------- ПИНЫ ---------------------
+const byte led[3][3] = {
+  {3, 4, 5},   // строка 0 (верх)
+  {6, 7, 8},   // строка 1
+  {9, 10, 11}  // строка 2 (низ)
 };
+const byte BTN_L = A0, BTN_R = A1, BTN_U = A2, BTN_D = A3, BTN_C = A4;
 
-// Пины кнопок
-#define BTN_LEFT   A0
-#define BTN_RIGHT  A1
-#define BTN_UP     A2
-#define BTN_DOWN   A3
-#define BTN_CENTER A4
+// --------------------- НАСТРОЙКИ СКОРОСТИ ---------------------
+const unsigned long SHOW_ON  = 300;  // длительность зажигания при показе (мс)
+const unsigned long SHOW_OFF = 150;  // пауза между шагами показа (мс)
+const unsigned long BLINK    = 200;  // период мигания при проигрыше (мс)
+const unsigned long OVER_MS  = 2000; // общая длительность индикации проигрыша (мс)
 
-// Координаты курсора (столбец X, строка Y)
-int x = 1, y = 1;
+// --------------------- СОСТОЯНИЯ ---------------------
+enum State : byte { MENU, SHOW_SEQ, INPUT, GAMEOVER };
+State state = MENU;
 
-// Последовательность (максимум 20 шагов)
-int seqX[20], seqY[20];
-int len = 0;        // текущая длина последовательности
+// --------------------- ПЕРЕМЕННЫЕ ---------------------
+byte curX = 1, curY = 1;        // позиция курсора (столбец X, строка Y)
+byte seqX[32], seqY[32];        // последовательность (макс. длина)
+byte seqLen = 0;                // текущая длина
+byte inputIdx = 0;              // какой шаг ждём от игрока
 
-void setup() {
-  // Светодиоды
-  for (int r = 0; r < 3; r++)
-    for (int c = 0; c < 3; c++)
-      pinMode(led[r][c], OUTPUT);
+// --------------------- АНТИДРЕБЕЗГ КНОПОК ---------------------
+bool lastBtn[5] = {1,1,1,1,1};
+bool currBtn[5] = {1,1,1,1,1};
+unsigned long debTimer[5];
 
-  // Кнопки с внутренней подтяжкой
-  pinMode(BTN_LEFT, INPUT_PULLUP);
-  pinMode(BTN_RIGHT, INPUT_PULLUP);
-  pinMode(BTN_UP, INPUT_PULLUP);
-  pinMode(BTN_DOWN, INPUT_PULLUP);
-  pinMode(BTN_CENTER, INPUT_PULLUP);
+bool readBtn(byte i) {
+  byte pin;
+  if      (i==0) pin = BTN_L;
+  else if (i==1) pin = BTN_R;
+  else if (i==2) pin = BTN_U;
+  else if (i==3) pin = BTN_D;
+  else            pin = BTN_C;
 
-  Serial.begin(9600);   // для отладки (обязательно откройте монитор порта)
-  randomSeed(analogRead(A5));
-
-  // Зажигаем центральный светодиод при старте — мы в меню
-  allOff();
-  digitalWrite(led[y][x], HIGH);
-  Serial.println("МЕНЮ. Жду команду...");
-}
-
-// Выключить все светодиоды
-void allOff() {
-  for (int r = 0; r < 3; r++)
-    for (int c = 0; c < 3; c++)
-      digitalWrite(led[r][c], LOW);
-}
-
-// Зажечь только один светодиод в позиции (col, row)
-void setLED(int col, int row) {
-  allOff();
-  if (col >= 0 && col < 3 && row >= 0 && row < 3)
-    digitalWrite(led[row][col], HIGH);
-}
-
-// Проверка, нажата ли кнопка (просто LOW с задержкой 200 мс)
-bool isPressed(int pin) {
-  if (digitalRead(pin) == LOW) {
-    delay(200);                     // антидребезг
-    return (digitalRead(pin) == LOW);
+  bool raw = !digitalRead(pin);   // HIGH=не нажата, LOW=нажата -> переворачиваем для удобства
+  if (raw != lastBtn[i]) debTimer[i] = millis();
+  if ((millis() - debTimer[i]) > 30) {   // 30 мс дребезг
+    if (raw != currBtn[i]) {
+      currBtn[i] = raw;
+      if (raw) { lastBtn[i] = raw; return true; } // переход 0->1 (нажатие)
+      lastBtn[i] = raw;
+    }
   }
   return false;
 }
 
-// Показать всю последовательность
+// --------------------- ФУНКЦИИ СВЕТОДИОДОВ ---------------------
+void allOff() {
+  for (byte r=0; r<3; r++)
+    for (byte c=0; c<3; c++)
+      digitalWrite(led[r][c], LOW);
+}
+
+void setLED(byte col, byte row) {
+  allOff();
+  if (col<3 && row<3) digitalWrite(led[row][col], HIGH);
+}
+
+// --------------------- ПОКАЗАТЬ ВСЮ ПОСЛЕДОВАТЕЛЬНОСТЬ ---------------------
 void showSequence() {
-  for (int i = 0; i < len; i++) {
+  allOff();
+  delay(200);                     // подготовительная пауза
+  for (byte i=0; i<seqLen; i++) {
     setLED(seqX[i], seqY[i]);
-    delay(500);
+    delay(SHOW_ON);
     allOff();
-    delay(300);
+    delay(SHOW_OFF);
   }
 }
 
-// Игра окончена (мигание)
-void gameOver() {
-  Serial.println("ОШИБКА! Игра окончена.");
-  for (int i = 0; i < 6; i++) {
-    for (int r = 0; r < 3; r++)
-      for (int c = 0; c < 3; c++)
-        digitalWrite(led[r][c], HIGH);
-    delay(300);
-    allOff();
-    delay(300);
-  }
-  // Возврат в меню
-  x = 1; y = 1;
-  setLED(x, y);
-  Serial.println("МЕНЮ.");
+// --------------------- НАЧАТЬ НОВУЮ ИГРУ ---------------------
+void newGame() {
+  seqLen = 1;
+  seqX[0] = random(3);
+  seqY[0] = random(3);
+  inputIdx = 0;
 }
 
+// --------------------- SETUP ---------------------
+void setup() {
+  for (byte r=0; r<3; r++)
+    for (byte c=0; c<3; c++)
+      pinMode(led[r][c], OUTPUT);
+  allOff();
+
+  pinMode(BTN_L, INPUT_PULLUP);
+  pinMode(BTN_R, INPUT_PULLUP);
+  pinMode(BTN_U, INPUT_PULLUP);
+  pinMode(BTN_D, INPUT_PULLUP);
+  pinMode(BTN_C, INPUT_PULLUP);
+
+  randomSeed(analogRead(A5));
+  setLED(curX, curY);   // курсор в центре при старте
+}
+
+// --------------------- MAIN LOOP ---------------------
 void loop() {
-  // Обработка кнопок
-  if (isPressed(BTN_LEFT)) {
-    Serial.print("ВЛЕВО  ");
-    if (x > 0) x--;
-    setLED(x, y);
-    Serial.print("x="); Serial.print(x); Serial.print(" y="); Serial.println(y);
+  bool left  = readBtn(0);
+  bool right = readBtn(1);
+  bool up    = readBtn(2);
+  bool down  = readBtn(3);
+  bool center= readBtn(4);
+
+  // ============ МЕНЮ ============
+  if (state == MENU) {
+    if (left  && curX>0) curX--;
+    if (right && curX<2) curX++;
+    if (up    && curY>0) curY--;
+    if (down  && curY<2) curY++;
+    if (center) {
+      newGame();
+      showSequence();
+      state = INPUT;
+      curX = 1; curY = 1;   // сброс курсора в центр для ввода
+    }
+    setLED(curX, curY);
   }
-  if (isPressed(BTN_RIGHT)) {
-    Serial.print("ВПРАВО ");
-    if (x < 2) x++;
-    setLED(x, y);
-    Serial.print("x="); Serial.print(x); Serial.print(" y="); Serial.println(y);
-  }
-  if (isPressed(BTN_UP)) {
-    Serial.print("ВВЕРХ  ");
-    if (y > 0) y--;
-    setLED(x, y);
-    Serial.print("x="); Serial.print(x); Serial.print(" y="); Serial.println(y);
-  }
-  if (isPressed(BTN_DOWN)) {
-    Serial.print("ВНИЗ   ");
-    if (y < 2) y++;
-    setLED(x, y);
-    Serial.print("x="); Serial.print(x); Serial.print(" y="); Serial.println(y);
-  }
-  if (isPressed(BTN_CENTER)) {
-    Serial.println("ЦЕНТР – старт игры");
-    // Начинаем новую игру
-    len = 1;
-    seqX[0] = random(3);
-    seqY[0] = random(3);
-    // Показываем первый шаг
-    setLED(seqX[0], seqY[0]);
-    delay(500);
-    allOff();
-    delay(300);
-    // Теперь игрок должен повторить
-    for (int step = 0; step < len; step++) {
-      // Ждём, пока игрок выберет правильную позицию
-      bool ok = false;
-      while (!ok) {
-        // перемещение курсора
-        if (isPressed(BTN_LEFT)  && x > 0) { x--; setLED(x, y); }
-        if (isPressed(BTN_RIGHT) && x < 2) { x++; setLED(x, y); }
-        if (isPressed(BTN_UP)    && y > 0) { y--; setLED(x, y); }
-        if (isPressed(BTN_DOWN)  && y < 2) { y++; setLED(x, y); }
-        // подтверждение выбора
-        if (isPressed(BTN_CENTER)) {
-          if (x == seqX[step] && y == seqY[step]) {
-            Serial.println("Верно!");
-            ok = true;
-          } else {
-            gameOver();
-            return;   // выходим из loop, начнётся заново
+
+  // ============ ВВОД ИГРОКА ============
+  else if (state == INPUT) {
+    if (left  && curX>0) curX--;
+    if (right && curX<2) curX++;
+    if (up    && curY>0) curY--;
+    if (down  && curY<2) curY++;
+
+    if (center) {
+      if (curX == seqX[inputIdx] && curY == seqY[inputIdx]) {
+        // правильный шаг
+        inputIdx++;
+        if (inputIdx >= seqLen) {
+          // успешно прошли всю последовательность — усложняем
+          if (seqLen < 32) {
+            seqX[seqLen] = random(3);
+            seqY[seqLen] = random(3);
+            seqLen++;
           }
+          inputIdx = 0;
+          showSequence();
+          curX = 1; curY = 1;
+          // остаёмся в INPUT
         }
+        // else: просто ждём следующий шаг
+      } else {
+        // ошибка
+        state = GAMEOVER;
+        allOff();
+        unsigned long t = millis();
+        while (millis() - t < OVER_MS) {
+          for (byte r=0; r<3; r++)
+            for (byte c=0; c<3; c++)
+              digitalWrite(led[r][c], HIGH);
+          delay(BLINK);
+          allOff();
+          delay(BLINK);
+        }
+        state = MENU;
+        curX = 1; curY = 1;
       }
-      // Короткая вспышка подтверждения
-      setLED(x, y);
-      delay(200);
-      allOff();
-      delay(200);
     }
-    // Раунд пройден – добавляем ещё один шаг
-    if (len < 20) {
-      seqX[len] = random(3);
-      seqY[len] = random(3);
-      len++;
-    }
-    // Показываем обновлённую последовательность
-    showSequence();
-    // Снова ожидаем ввод с первого шага
-    // (логика повторится в следующем цикле, но для простоты просто перезапускаем игру с новой длиной)
-    // В данной упрощённой версии игра фактически идёт только на один раунд,
-    // потому что после правильного ввода раунд завершается и снова показывается меню.
-    // Чтобы сделать бесконечную игру с нарастающей длиной, код нужно чуть усложнить.
-    // Но я намеренно оставил так для максимальной простоты – вы увидите, что кнопки работают.
+    setLED(curX, curY);
   }
+
+  delay(10); // стабильность
 }

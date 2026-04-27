@@ -19,7 +19,7 @@ const unsigned long BLINK    = 200;  // период мигания при пр�
 const unsigned long OVER_MS  = 2000; // общая длительность индикации проигрыша (мс)
 
 // --------------------- СОСТОЯНИЯ ---------------------
-enum State : byte { MENU, SHOW_SEQ, INPUT, GAMEOVER };
+enum State : byte { MENU, SHOW_SEQ, PLAY, GAMEOVER };
 State state = MENU;
 
 // --------------------- ПЕРЕМЕННЫЕ ---------------------
@@ -119,14 +119,14 @@ void loop() {
     if (center) {
       newGame();
       showSequence();
-      state = INPUT;
+      state = PLAY;
       curX = 1; curY = 1;   // сброс курсора в центр для ввода
     }
     setLED(curX, curY);
   }
 
-  // ============ ВВОД ИГРОКА ============
-  else if (state == INPUT) {
+  // ============ ВВОД ИГРОКА (PLAY) ============
+  else if (state == PLAY) {
     if (left  && curX>0) curX--;
     if (right && curX<2) curX++;
     if (up    && curY>0) curY--;
@@ -146,7 +146,7 @@ void loop() {
           inputIdx = 0;
           showSequence();
           curX = 1; curY = 1;
-          // остаёмся в INPUT
+          // остаёмся в PLAY
         }
         // else: просто ждём следующий шаг
       } else {

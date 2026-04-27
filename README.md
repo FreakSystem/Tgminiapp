@@ -1,83 +1,86 @@
 /*
- * Игра "Повтори последовательность" (матрица 3x3)
+ * Игра "Повтори последовательность" (матрица 3x3) — АПГРЕЙД
+ * Основан на работающем коде.
  * Светодиоды: D3..D11, общий катод через резистор -> GND
- * Кнопки: A0=влево, A1=вправо, A2=вверх, A3=вниз, A4=центр (все к GND, INPUT_PULLUP)
+ * Кнопки: A0=влево, A1=вправо, A2=вверх, A3=вниз, A4=центр (все к GND)
  */
 
 // --------------------- ПИНЫ ---------------------
-const byte led[3][3] = {
-  {3, 4, 5},   // строка 0 (верх)
-  {6, 7, 8},   // строка 1
-  {9, 10, 11}  // строка 2 (низ)
+int led[3][3] = {
+  {3, 4, 5},
+  {6, 7, 8},
+  {9, 10, 11}
 };
-const byte BTN_L = A0, BTN_R = A1, BTN_U = A2, BTN_D = A3, BTN_C = A4;
 
-// --------------------- НАСТРОЙКИ СКОРОСТИ ---------------------
-const unsigned long SHOW_ON  = 300;  // длительность зажигания при показе (мс)
-const unsigned long SHOW_OFF = 150;  // пауза между шагами показа (мс)
-const unsigned long BLINK    = 200;  // период мигания при проигрыше (мс)
-const unsigned long OVER_MS  = 2000; // общая длительность индикации проигрыша (мс)
+#define BTN_LEFT   A0
+#define BTN_RIGHT  A1
+#define BTN_UP     A2
+#define BTN_DOWN   A3
+#define BTN_CENTER A4
 
 // --------------------- СОСТОЯНИЯ ---------------------
-enum State : byte { MENU, SHOW_SEQ, PLAY, GAMEOVER };
-State state = MENU;
+#define STATE_MENU      0
+#define STATE_SHOW      1
+#define STATE_INPUT     2
+#define STATE_OVER      3
+
+int gameState = STATE_MENU;
 
 // --------------------- ПЕРЕМЕННЫЕ ---------------------
-byte curX = 1, curY = 1;        // позиция курсора (столбец X, строка Y)
-byte seqX[32], seqY[32];        // последовательность (макс. длина)
-byte seqLen = 0;                // текущая длина
-byte inputIdx = 0;              // какой шаг ждём от игрока
+int x = 1, y = 1;            // курсор (столбец, строка)
+int seqX[32], seqY[32];      // последовательность
+int seqLen = 0;              // текущая длина
+int inputIdx = 0;            // какой шаг вводим
 
-// --------------------- АНТИДРЕБЕЗГ КНОПОК ---------------------
-bool lastBtn[5] = {1,1,1,1,1};
-bool currBtn[5] = {1,1,1,1,1};
-unsigned long debTimer[5];
+// --------------------- ФУНКЦИИ ---------------------
+void allOff() {
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      digitalWrite(led[r][c], LOW);
+}
 
-bool readBtn(byte i) {
-  byte pin;
-  if      (i==0) pin = BTN_L;
-  else if (i==1) pin = BTN_R;
-  else if (i==2) pin = BTN_U;
-  else if (i==3) pin = BTN_D;
-  else            pin = BTN_C;
+void setLED(int col, int row) {
+  allOff();
+  if (col >= 0 && col < 3 && row >= 0 && row < 3)
+    digitalWrite(led[row][col], HIGH);
+}
 
-  bool raw = !digitalRead(pin);   // HIGH=не нажата, LOW=нажата -> переворачиваем для удобства
-  if (raw != lastBtn[i]) debTimer[i] = millis();
-  if ((millis() - debTimer[i]) > 30) {   // 30 мс дребезг
-    if (raw != currBtn[i]) {
-      currBtn[i] = raw;
-      if (raw) { lastBtn[i] = raw; return true; } // переход 0->1 (нажатие)
-      lastBtn[i] = raw;
-    }
+// Проверка нажатия (рабочая, с задержкой)
+bool isPressed(int pin) {
+  if (digitalRead(pin) == LOW) {
+    delay(200);
+    return (digitalRead(pin) == LOW);
   }
   return false;
 }
 
-// --------------------- ФУНКЦИИ СВЕТОДИОДОВ ---------------------
-void allOff() {
-  for (byte r=0; r<3; r++)
-    for (byte c=0; c<3; c++)
-      digitalWrite(led[r][c], LOW);
-}
-
-void setLED(byte col, byte row) {
-  allOff();
-  if (col<3 && row<3) digitalWrite(led[row][col], HIGH);
-}
-
-// --------------------- ПОКАЗАТЬ ВСЮ ПОСЛЕДОВАТЕЛЬНОСТЬ ---------------------
+// Показать всю последовательность (быстро)
 void showSequence() {
   allOff();
-  delay(200);                     // подготовительная пауза
-  for (byte i=0; i<seqLen; i++) {
+  delay(200);
+  for (int i = 0; i < seqLen; i++) {
     setLED(seqX[i], seqY[i]);
-    delay(SHOW_ON);
+    delay(400);   // можно менять скорость
     allOff();
-    delay(SHOW_OFF);
+    delay(200);
   }
 }
 
-// --------------------- НАЧАТЬ НОВУЮ ИГРУ ---------------------
+// Мигание при ошибке
+void gameOver() {
+  for (int i = 0; i < 6; i++) {
+    for (int r = 0; r < 3; r++)
+      for (int c = 0; c < 3; c++)
+        digitalWrite(led[r][c], HIGH);
+    delay(300);
+    allOff();
+    delay(300);
+  }
+  x = 1; y = 1;
+  setLED(x, y);
+}
+
+// Начало новой игры (1 шаг)
 void newGame() {
   seqLen = 1;
   seqX[0] = random(3);
@@ -87,57 +90,66 @@ void newGame() {
 
 // --------------------- SETUP ---------------------
 void setup() {
-  for (byte r=0; r<3; r++)
-    for (byte c=0; c<3; c++)
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
       pinMode(led[r][c], OUTPUT);
-  allOff();
 
-  pinMode(BTN_L, INPUT_PULLUP);
-  pinMode(BTN_R, INPUT_PULLUP);
-  pinMode(BTN_U, INPUT_PULLUP);
-  pinMode(BTN_D, INPUT_PULLUP);
-  pinMode(BTN_C, INPUT_PULLUP);
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_CENTER, INPUT_PULLUP);
 
+  Serial.begin(9600);
   randomSeed(analogRead(A5));
-  setLED(curX, curY);   // курсор в центре при старте
+
+  allOff();
+  setLED(x, y);
+  Serial.println("МЕНЮ");
 }
 
 // --------------------- MAIN LOOP ---------------------
 void loop() {
-  bool left  = readBtn(0);
-  bool right = readBtn(1);
-  bool up    = readBtn(2);
-  bool down  = readBtn(3);
-  bool center= readBtn(4);
+  // ---------- ОБРАБОТКА КНОПОК (одинаковая для всех состояний) ----------
+  bool left  = isPressed(BTN_LEFT);
+  bool right = isPressed(BTN_RIGHT);
+  bool up    = isPressed(BTN_UP);
+  bool down  = isPressed(BTN_DOWN);
+  bool center= isPressed(BTN_CENTER);
 
-  // ============ МЕНЮ ============
-  if (state == MENU) {
-    if (left  && curX>0) curX--;
-    if (right && curX<2) curX++;
-    if (up    && curY>0) curY--;
-    if (down  && curY<2) curY++;
+  // ---------- МЕНЮ ----------
+  if (gameState == STATE_MENU) {
+    if (left  && x > 0) x--;
+    if (right && x < 2) x++;
+    if (up    && y > 0) y--;
+    if (down  && y < 2) y++;
     if (center) {
+      Serial.println("СТАРТ ИГРЫ");
       newGame();
       showSequence();
-      state = PLAY;
-      curX = 1; curY = 1;   // сброс курсора в центр для ввода
+      gameState = STATE_INPUT;
+      x = 1; y = 1;
     }
-    setLED(curX, curY);
+    setLED(x, y);
   }
 
-  // ============ ВВОД ИГРОКА (PLAY) ============
-  else if (state == PLAY) {
-    if (left  && curX>0) curX--;
-    if (right && curX<2) curX++;
-    if (up    && curY>0) curY--;
-    if (down  && curY<2) curY++;
-
+  // ---------- ВВОД ИГРОКА ----------
+  else if (gameState == STATE_INPUT) {
+    if (left  && x > 0) x--;
+    if (right && x < 2) x++;
+    if (up    && y > 0) y--;
+    if (down  && y < 2) y++;
     if (center) {
-      if (curX == seqX[inputIdx] && curY == seqY[inputIdx]) {
-        // правильный шаг
+      if (x == seqX[inputIdx] && y == seqY[inputIdx]) {
+        // Правильный шаг
+        Serial.print("Верно! (");
+        Serial.print(inputIdx+1);
+        Serial.print("/");
+        Serial.print(seqLen);
+        Serial.println(")");
         inputIdx++;
         if (inputIdx >= seqLen) {
-          // успешно прошли всю последовательность — усложняем
+          // Вся последовательность пройдена -> добавляем новый шаг
           if (seqLen < 32) {
             seqX[seqLen] = random(3);
             seqY[seqLen] = random(3);
@@ -145,29 +157,22 @@ void loop() {
           }
           inputIdx = 0;
           showSequence();
-          curX = 1; curY = 1;
-          // остаёмся в PLAY
+          x = 1; y = 1;
+          // остаёмся в STATE_INPUT
         }
-        // else: просто ждём следующий шаг
       } else {
-        // ошибка
-        state = GAMEOVER;
-        allOff();
-        unsigned long t = millis();
-        while (millis() - t < OVER_MS) {
-          for (byte r=0; r<3; r++)
-            for (byte c=0; c<3; c++)
-              digitalWrite(led[r][c], HIGH);
-          delay(BLINK);
-          allOff();
-          delay(BLINK);
-        }
-        state = MENU;
-        curX = 1; curY = 1;
+        // Ошибка
+        Serial.println("ОШИБКА!");
+        gameState = STATE_OVER;
       }
     }
-    setLED(curX, curY);
+    setLED(x, y);
   }
 
-  delay(10); // стабильность
+  // ---------- КОНЕЦ ИГРЫ ----------
+  else if (gameState == STATE_OVER) {
+    gameOver();                // мигание и возврат курсора в центр
+    gameState = STATE_MENU;
+    Serial.println("МЕНЮ");
+  }
 }

@@ -1,6 +1,5 @@
-// ============ ИГРА ДЛЯ ARDUINO NANO ============
-// Светодиоды: D3..D11 (матрица 3x3), общий катод через резистор к GND
-// Кнопки: A0=влево, A1=вправо, A2=вверх, A3=вниз, A4=центр (все к GND, INPUT_PULLUP)
+// Упрощённая игра "Повтори последовательность" (Nano)
+// Светодиоды D3..D11 (матрица 3x3), кнопки A0..A4
 
 const byte ledPins[3][3] = {
   {3, 4, 5},
@@ -8,49 +7,160 @@ const byte ledPins[3][3] = {
   {9, 10, 11}
 };
 
-const byte BTN_LEFT   = A0;
-const byte BTN_RIGHT  = A1;
-const byte BTN_UP     = A2;
-const byte BTN_DOWN   = A3;
-const byte BTN_CENTER = A4;
-
-enum State {MENU, GAME_SHOW_SEQ, GAME_INPUT, GAME_OVER};
-State gameState = MENU;
+const byte BTN_LEFT = A0, BTN_RIGHT = A1, BTN_UP = A2, BTN_DOWN = A3, BTN_CENTER = A4;
 
 int curX = 1, curY = 1;
+int seqX[20], seqY[20], seqLen = 0, inputIndex = 0;
 
-const int MAX_SEQ = 20;
-int seqX[MAX_SEQ];
-int seqY[MAX_SEQ];
-int seqLen = 0;
-int inputIndex = 0;
+enum State {MENU, SHOW, INPUT, OVER};
+State state = MENU;
 
-unsigned long seqTimer = 0;
-int seqStep = 0;
-bool seqLightOn = false;
-const unsigned long seqOnTime = 500;
-const unsigned long seqOffTime = 300;
+void setLED(int x, int y) {
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      digitalWrite(ledPins[r][c], LOW);
+  if (x >= 0 && x < 3 && y >= 0 && y < 3)
+    digitalWrite(ledPins[x][y], HIGH);
+}
 
-unsigned long gameOverTimer = 0;
-const unsigned long gameOverBlink = 300;
+void clearLEDs() {
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      digitalWrite(ledPins[r][c], LOW);
+}
 
-// ---------- ДРЕБЕЗГ КНОПОК ----------
-const byte numButtons = 5;
-byte buttonPins[numButtons] = {BTN_LEFT, BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_CENTER};
-bool lastStableState[numButtons] = {HIGH, HIGH, HIGH, HIGH, HIGH};
-bool currentState[numButtons];
-unsigned long debounceTimer[numButtons] = {0};
-const unsigned long debounceDelay = 50;
+void setup() {
+  Serial.begin(9600);
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 3; c++)
+      pinMode(ledPins[r][c], OUTPUT);
+  clearLEDs();
 
-bool readButton(byte index) {
-  bool reading = digitalRead(buttonPins[index]);
-  if (reading != lastStableState[index]) {
-    debounceTimer[index] = millis();
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_CENTER, INPUT_PULLUP);
+
+  randomSeed(analogRead(A5));
+  Serial.println("Игра готова. Меню.");
+  setLED(1, 1); // зажигаем курсор в центре
+}
+
+void loop() {
+  // Простейшее чтение кнопок с антидребезгом через delay
+  bool left  = (digitalRead(BTN_LEFT) == LOW);
+  bool right = (digitalRead(BTN_RIGHT) == LOW);
+  bool up    = (digitalRead(BTN_UP) == LOW);
+  bool down  = (digitalRead(BTN_DOWN) == LOW);
+  bool center = (digitalRead(BTN_CENTER) == LOW);
+
+  if (left || right || up || down || center) {
+    delay(200); // антидребезг
+    // Повторно читаем, чтобы убедиться, что кнопка всё ещё нажата
+    left  = (digitalRead(BTN_LEFT) == LOW);
+    right = (digitalRead(BTN_RIGHT) == LOW);
+    up    = (digitalRead(BTN_UP) == LOW);
+    down  = (digitalRead(BTN_DOWN) == LOW);
+    center = (digitalRead(BTN_CENTER) == LOW);
   }
-  if ((millis() - debounceTimer[index]) > debounceDelay) {
-    if (reading != currentState[index]) {
-      currentState[index] = reading;
-      if (reading == LOW) {
+
+  // Отладка в монитор
+  if (left)  Serial.println("LEFT");
+  if (right) Serial.println("RIGHT");
+  if (up)    Serial.println("UP");
+  if (down)  Serial.println("DOWN");
+  if (center) Serial.println("CENTER");
+
+  switch (state) {
+    case MENU:
+      if (left)  curX = max(0, curX - 1);
+      if (right) curX = min(2, curX + 1);
+      if (up)    curY = max(0, curY - 1);
+      if (down)  curY = min(2, curY + 1);
+      if (center) {
+        Serial.println("Начинаем игру!");
+        seqLen = 0;
+        inputIndex = 0;
+        seqX[seqLen] = random(3);
+        seqY[seqLen] = random(3);
+        seqLen++;
+        state = SHOW;
+        // Покажем первый шаг сразу
+        setLED(seqX[0], seqY[0]);
+        delay(500);
+        clearLEDs();
+        delay(300);
+        if (seqLen > 1) {
+          // Показать все шаги последовательности
+          for (int i = 1; i < seqLen; i++) {
+            setLED(seqX[i], seqY[i]);
+            delay(500);
+            clearLEDs();
+            delay(300);
+          }
+        }
+        state = INPUT;
+        curX = 1; curY = 1;
+        setLED(curX, curY);
+      }
+      break;
+
+    case INPUT:
+      if (left)  curX = max(0, curX - 1);
+      if (right) curX = min(2, curX + 1);
+      if (up)    curY = max(0, curY - 1);
+      if (down)  curY = min(2, curY + 1);
+      if (center) {
+        Serial.print("Выбор: "); Serial.print(curX); Serial.print(","); Serial.println(curY);
+        if (curX == seqX[inputIndex] && curY == seqY[inputIndex]) {
+          inputIndex++;
+          if (inputIndex >= seqLen) {
+            // Уровень пройден, добавляем новый шаг
+            seqX[seqLen] = random(3);
+            seqY[seqLen] = random(3);
+            seqLen++;
+            state = SHOW;
+            // Показ всей последовательности
+            for (int i = 0; i < seqLen; i++) {
+              setLED(seqX[i], seqY[i]);
+              delay(500);
+              clearLEDs();
+              delay(300);
+            }
+            state = INPUT;
+            inputIndex = 0;
+            curX = 1; curY = 1;
+            setLED(curX, curY);
+          }
+          // Если ещё не все шаги введены, просто остаёмся в INPUT
+        } else {
+          // Ошибка
+          Serial.println("Ошибка! Игра окончена.");
+          state = OVER;
+          // Мигаем всеми светодиодами
+          for (int i = 0; i < 6; i++) {
+            for (int r = 0; r < 3; r++)
+              for (int c = 0; c < 3; c++)
+                digitalWrite(ledPins[r][c], HIGH);
+            delay(300);
+            clearLEDs();
+            delay(300);
+          }
+          state = MENU;
+          curX = 1; curY = 1;
+          setLED(curX, curY);
+        }
+      }
+      break;
+  }
+
+  // Отображаем курсор, если не в режиме показа
+  if (state == MENU || state == INPUT) {
+    setLED(curX, curY);
+  }
+  delay(50); // стабилизация
+}      if (reading == LOW) {
         lastStableState[index] = reading;
         return true;
       }
